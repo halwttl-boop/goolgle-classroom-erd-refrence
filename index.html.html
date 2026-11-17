@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Google Classroom ERD Reference</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #202124; background: #f8f9fa; margin: 0; padding: 32px; line-height: 1.5; }
+  .container { max-width: 1100px; margin: 0 auto; background: #fff; padding: 32px 40px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+  h1 { color: #188038; border-bottom: 3px solid #188038; padding-bottom: 10px; margin-top: 0; }
+  h2 { color: #1a73e8; margin-top: 32px; border-bottom: 1px solid #dadce0; padding-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 14px; }
+  th { background: #188038; color: #fff; text-align: left; padding: 10px 12px; font-weight: 600; }
+  td { border: 1px solid #dadce0; padding: 10px 12px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8f9fa; }
+  code { background: #f1f3f4; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px; color: #c5221f; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; background: #e8f0fe; color: #1a73e8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Google Classroom ERD Architecture Reference</h1>
+
+  <h2>1. Functional Layers (14 Tables)</h2>
+  <table>
+    <thead>
+      <tr><th style="width:24%">Functional Layer</th><th style="width:34%">Included Tables</th><th style="width:42%">Responsibility</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Layer 1: Identity &amp; Enrollment</strong></td><td><code>USER_PROFILES</code>, <code>COURSES</code>, <code>COURSE_ROSTERS</code>, <code>INVITATIONS</code>, <code>GUARDIANS</code></td><td>Manages user identities, class definitions, course-specific roles, pending email invites, and parent links.</td></tr>
+      <tr><td><strong>Layer 2: Stream &amp; Organization</strong></td><td><code>TOPICS</code>, <code>ANNOUNCEMENTS</code>, <code>COURSEWORK</code></td><td>Separates ungraded class announcements from graded assignments and organizes work into unit folders.</td></tr>
+      <tr><td><strong>Layer 3: Grading &amp; Submissions</strong></td><td><code>STUDENT_SUBMISSIONS</code>, <code>SUBMISSION_HISTORY</code>, <code>RUBRICS</code>, <code>RUBRIC_CRITERIA</code></td><td>Tracks student turn-ins, draft vs. returned scores, structured grading rubrics, and audit logs.</td></tr>
+      <tr><td><strong>Layer 4: Media &amp; Discussion</strong></td><td><code>ATTACHMENTS</code>, <code>COMMENTS</code></td><td>Stores Drive files, YouTube videos, web links, and public or private comments across all items.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2. Core Architectural Design Decisions</h2>
+  <table>
+    <thead>
+      <tr><th style="width:32%">Design Choice</th><th style="width:68%">Architectural Rationale</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Roles in <code>COURSE_ROSTERS</code></strong></td><td>Stores <code>TEACHER</code> or <code>STUDENT</code> per course rather than on <code>USER_PROFILES</code>, allowing one account to teach one class while taking another.</td></tr>
+      <tr><td><strong><code>INVITATIONS</code> &rarr; <code>COURSE_ROSTERS</code></strong></td><td>Pending email invites stay in <code>INVITATIONS</code> (<code>PENDING</code>) until accepted, then transition into a permanent <code>COURSE_ROSTERS</code> row.</td></tr>
+      <tr><td><strong>Dual FKs on <code>STUDENT_SUBMISSIONS</code></strong></td><td>Storing both <code>coursework_id</code> and <code>course_id</code> allows the teacher's Grades tab grid to load an entire class gradebook in one fast index query.</td></tr>
+      <tr><td><strong><code>draft_grade</code> vs. <code>assigned_grade</code></strong></td><td>Teachers stage private scores in <code>draft_grade</code>; clicking <em>Return</em> copies the score to <code>assigned_grade</code> and updates state to <code>RETURNED</code>.</td></tr>
+      <tr><td><strong><code>SUBMISSION_HISTORY</code> Audit Log</strong></td><td>Append-only timeline logging every turn-in, unsubmit (<code>RECLAIMED_BY_STUDENT</code>), and grade update with timestamps and <code>actor_id</code>.</td></tr>
+      <tr><td><strong>3 Nullable FKs on Media/Comments</strong></td><td>Each row in <code>ATTACHMENTS</code> or <code>COMMENTS</code> fills exactly one of <code>ann_id</code>, <code>coursework_id</code>, or <code>submission_id</code>, avoiding 6 duplicate tables while maintaining real SQL foreign keys.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. Complete 14-Table Data Dictionary</h2>
+  <table>
+    <thead>
+      <tr><th style="width:20%">Table Name</th><th style="width:15%">Primary Key</th><th style="width:25%">Foreign Keys</th><th style="width:40%">Business Purpose &amp; Key Rules</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>USER_PROFILES</strong></td><td><code>user_id</code></td><td><em>None</em></td><td>Master identity table for teachers, students, and guardians. <code>email_address</code> must be unique.</td></tr>
+      <tr><td><strong>COURSES</strong></td><td><code>course_id</code></td><td><code>owner_id</code></td><td>Stores class details (<code>name</code>, <code>section</code>, <code>enrollment_code</code>). Tracks <code>ACTIVE</code> or <code>ARCHIVED</code> state.</td></tr>
+      <tr><td><strong>COURSE_ROSTERS</strong></td><td><code>roster_id</code></td><td><code>course_id</code>, <code>user_id</code></td><td>Resolves M:N user-course relationship. <code>UNIQUE(course_id, user_id)</code> prevents duplicates.</td></tr>
+      <tr><td><strong>INVITATIONS</strong></td><td><code>invitation_id</code></td><td><code>course_id</code></td><td>Tracks pending email invites (<code>PENDING</code>, <code>ACCEPTED</code>, <code>DECLINED</code>) before roster entry.</td></tr>
+      <tr><td><strong>GUARDIANS</strong></td><td><code>guard_id</code></td><td><code>student_id</code>, <code>guardian_id</code></td><td>Links two <code>USER_PROFILES</code> rows so parents receive automated progress summaries.</td></tr>
+      <tr><td><strong>TOPICS</strong></td><td><code>topic_id</code></td><td><code>course_id</code></td><td>Acts as folders/units in Classwork to organize assignments by week or subject.</td></tr>
+      <tr><td><strong>ANNOUNCEMENTS</strong></td><td><code>ann_id</code></td><td><code>course_id</code>, <code>creator_id</code></td><td>Stores ungraded stream posts made to the class feed.</td></tr>
+      <tr><td><strong>COURSEWORK</strong></td><td><code>coursework_id</code></td><td><code>course_id</code>, <code>topic_id</code>, <code>creator_id</code></td><td>Stores assignments, quizzes, and questions. Nullable <code>topic_id</code> allows uncategorized items.</td></tr>
+      <tr><td><strong>RUBRICS</strong></td><td><code>rubric_id</code></td><td><code>coursework_id</code> (UQ)</td><td>Optional 1:1 scoring matrix per assignment. <code>use_scoring</code> toggles point calculation.</td></tr>
+      <tr><td><strong>RUBRIC_CRITERIA</strong></td><td><code>criterion_id</code></td><td><code>rubric_id</code></td><td>Breaks a rubric into graded rows (e.g., Thesis, Grammar) with separate <code>max_points</code>.</td></tr>
+      <tr><td><strong>STUDENT_SUBMISSIONS</strong></td><td><code>submission_id</code></td><td><code>coursework_id</code>, <code>course_id</code>, <code>user_id</code></td><td>Tracks student work, <code>late_flag</code>, state, and grades. <code>UNIQUE(coursework_id, user_id)</code>.</td></tr>
+      <tr><td><strong>SUBMISSION_HISTORY</strong></td><td><code>history_id</code></td><td><code>submission_id</code>, <code>actor_id</code></td><td>Immutable audit trail logging every state transition and grade update with timestamps.</td></tr>
+      <tr><td><strong>ATTACHMENTS</strong></td><td><code>attachment_id</code></td><td><code>ann_id</code>, <code>coursework_id</code>, <code>submission_id</code></td><td>References Drive files (<code>drive_file_id</code>), YouTube videos, or links attached to any item.</td></tr>
+      <tr><td><strong>COMMENTS</strong></td><td><code>comment_id</code></td><td><code>ann_id</code>, <code>coursework_id</code>, <code>submission_id</code>, <code>author_id</code></td><td>Stores class discussions and private feedback (<code>is_private = TRUE</code> on submissions).</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. End-to-End Data Lifecycle</h2>
+  <table>
+    <thead>
+      <tr><th style="width:18%">Stage</th><th style="width:82%">Database Activity</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="badge">1. Setup</span></td><td>Teacher creates a row in <code>COURSES</code> (<code>C101</code>). Twenty students join via <code>enrollment_code</code>, creating 20 rows in <code>COURSE_ROSTERS</code> with <code>role_type = 'STUDENT'</code>.</td></tr>
+      <tr><td><span class="badge">2. Publishing</span></td><td>Teacher creates a <code>TOPICS</code> unit ("Unit 1") and posts an essay in <code>COURSEWORK</code> (<code>max_points = 100</code>), attaching a PDF in <code>ATTACHMENTS</code> and a grading grid in <code>RUBRICS</code> + <code>RUBRIC_CRITERIA</code>.</td></tr>
+      <tr><td><span class="badge">3. Auto-Init</span></td><td>Upon publishing, the system automatically inserts 20 blank rows into <code>STUDENT_SUBMISSIONS</code> (one per student) with <code>state = 'CREATED'</code>.</td></tr>
+      <tr><td><span class="badge">4. Submission</span></td><td>Student attaches their Google Doc in <code>ATTACHMENTS</code> and clicks Turn In. <code>STUDENT_SUBMISSIONS</code> updates to <code>TURNED_IN</code> (setting <code>late_flag</code> if overdue), and <code>SUBMISSION_HISTORY</code> logs the timestamp.</td></tr>
+      <tr><td><span class="badge">5. Grading</span></td><td>Teacher leaves a private note in <code>COMMENTS</code> (<code>is_private = TRUE</code>), sets <code>draft_grade = 92</code>, and clicks Return. <code>assigned_grade</code> becomes <code>92</code>, state becomes <code>RETURNED</code>, and <code>SUBMISSION_HISTORY</code> logs the release.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Delete Cascade Rules</h2>
+  <table>
+    <thead>
+      <tr><th style="width:26%">Delete Rule</th><th style="width:74%">Effect on Related Tables</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>ON DELETE CASCADE</code></td><td>Deleting a <code>COURSE</code> automatically removes its rosters, topics, announcements, coursework, and submissions. Deleting a <code>RUBRIC</code> removes its <code>RUBRIC_CRITERIA</code>.</td></tr>
+      <tr><td><code>ON DELETE SET NULL</code></td><td>Deleting a <code>TOPIC</code> sets <code>topic_id = NULL</code> on <code>COURSEWORK</code>, safely moving assignments to the top of Classwork without losing student grades.</td></tr>
+      <tr><td><code>RESTRICT</code> / No Cascade</td><td>Deleting a <code>USER_PROFILE</code> is blocked if they own active courses or appear in historical grade audit logs.</td></tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>
